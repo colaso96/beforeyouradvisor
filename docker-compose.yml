@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: writeoffs-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: writeoffs_gpt
+    ports:
+      - "5433:5432"
+    volumes:
+      - writeoffs_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d writeoffs_gpt"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  writeoffs_pgdata:

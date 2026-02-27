@@ -1,0 +1,164 @@
+{
+  "business_profiles": {
+    "software_developer": {
+      "display_name": "Software Developer / Engineer",
+      "industry": "Software Development",
+      "primary_activities": ["Coding", "System architecture", "Technical debt management", "Beta testing", "Dinners with clients"],
+      "ordinary_expenses": ["Cloud hosting (AWS/Azure)", "SaaS subscriptions", "High-end hardware", "IDEs", "Technical books"],
+      "gray_areas": ["Gaming consoles for 'testing'", "Mechanical keyboards", "Ergonomic furniture", "Conference travel"],
+      "operational_context": "High reliance on home office and high-performance hardware. Internet and electricity are mission-critical. Some dinners with clients"
+    },
+    "graphic_designer": {
+      "display_name": "Graphic Designer / Creative Director",
+      "industry": "Visual Design",
+      "primary_activities": ["Branding", "UI/UX design", "Asset creation", "Client mood-boarding"],
+      "ordinary_expenses": ["Adobe Creative Cloud", "Stock photography", "Font licenses", "Drawing tablets", "Color-accurate monitors"],
+      "gray_areas": ["Museum memberships (inspiration)", "Art books", "High-end lifestyle magazines", "Studio decor"],
+      "operational_context": "Heavy focus on aesthetic 'inspiration' and specialized input devices. Portfolio hosting is a primary cost."
+    },
+    "real_estate_agent": {
+      "display_name": "Real Estate Agent",
+      "industry": "Real Estate",
+      "primary_activities": ["Property tours", "Open houses", "Lead generation", "Market analysis"],
+      "ordinary_expenses": ["MLS fees", "Professional photography", "Signage", "Lockboxes", "Closing gifts"],
+      "gray_areas": ["Vehicle detailing", "Luxury car leases", "Designer clothing for 'brand image'", "Client entertainment"],
+      "operational_context": "Extremely high travel intensity. Business happens in the car and at restaurants. Appearance and networking are revenue drivers."
+    },
+    "influencer": {
+      "display_name": "Social Media Influencer / Content Creator",
+      "industry": "Digital Content Creation",
+      "primary_activities": ["Filming", "Editing", "Brand partnerships", "Engagement management"],
+      "ordinary_expenses": ["Cameras", "Lighting rigs", "Editing software", "Ring lights", "Props"],
+      "gray_areas": ["Wardrobe (if used for filming)", "Skincare/Makeup (for on-camera work)", "Travel for 'content'", "Dining for reviews"],
+      "operational_context": "Lines between personal life and business are blurred. The 'persona' is the product, making lifestyle costs potentially deductible."
+    },
+    "consultant": {
+      "display_name": "Management Consultant / Business Coach",
+      "industry": "Professional Consulting",
+      "primary_activities": ["Strategy sessions", "Client workshops", "Market research", "Public speaking"],
+      "ordinary_expenses": ["LinkedIn Premium", "CRM software", "Professional development", "Business insurance", "Travel to client sites"],
+      "gray_areas": ["High-end suits", "Executive memberships", "Business meals", "Books and self-help materials"],
+      "operational_context": "Minimal overhead but high networking and travel costs. Professional image and credentials are key."
+    },
+    "photographer": {
+      "display_name": "Photographer / Videographer",
+      "industry": "Visual Media Production",
+      "primary_activities": ["Shooting", "Post-production", "Location scouting", "Equipment maintenance"],
+      "ordinary_expenses": ["Lenses", "Camera bodies", "External drives", "Studio rent", "Insurance for gear"],
+      "gray_areas": ["Travel for scouting", "Backdrops that resemble home decor", "Drones", "Workshops"],
+      "operational_context": "Extremely high equipment costs. Gear is prone to damage and requires constant upgrades and insurance."
+    },
+    "ecommerce": {
+      "display_name": "E-commerce Seller (Resale/Handmade)",
+      "industry": "E-commerce / Retail",
+      "primary_activities": ["Inventory sourcing", "Packing/Shipping", "Customer service", "Digital marketing"],
+      "ordinary_expenses": ["COGS (Cost of Goods Sold)", "Shipping supplies", "Marketplace fees (Etsy/Shopify)", "Storage unit rent", "Advertising"],
+      "gray_areas": ["Mileage for 'thrifting'", "Home storage space", "Personal items 'repurposed' for shipping"],
+      "operational_context": "Physical space for inventory and shipping is the biggest hurdle. High volume of small, miscellaneous transactions."
+    },
+    "fitness_trainer": {
+      "display_name": "Fitness Trainer / Wellness Coach",
+      "industry": "Health and Fitness",
+      "primary_activities": ["Personal training", "Dietary planning", "Content filming", "Live classes"],
+      "ordinary_expenses": ["Gym rent/fees", "Equipment (weights/bands)", "Certifications", "Music licensing", "Scheduling software"],
+      "gray_areas": ["Athleisure/Activewear", "Supplements", "Groceries for 'recipe testing'", "Massage/Physio for 'body maintenance'"],
+      "operational_context": "The trainer's physical health is the 'equipment.' Wear and tear on gear and clothing is high."
+    },
+    "rideshare_driver": {
+      "display_name": "Rideshare / Delivery Driver",
+      "industry": "Gig Economy Transportation",
+      "primary_activities": ["Driving", "Vehicle maintenance", "Navigation", "Customer service"],
+      "ordinary_expenses": ["Gas", "Tolls", "Vehicle maintenance", "Phone data plan", "Dash cams"],
+      "gray_areas": ["Car washes/Detailing", "Passenger perks (water/snacks)", "Vehicle depreciation", "Spotify/Music subscriptions"],
+      "operational_context": "The vehicle is the office. Mileage tracking is the single most important tax factor."
+    },
+    "writer": {
+      "display_name": "Writer / Copywriter / Editor",
+      "industry": "Writing and Publishing",
+      "primary_activities": ["Drafting", "Research", "Editing", "Pitching"],
+      "ordinary_expenses": ["Grammarly/Writing software", "Reference books", "Home office", "Portfolio hosting", "Journalism subscriptions"],
+      "gray_areas": ["Coffee shop 'offices'", "Research travel", "Newspapers/Magazines", "Streaming services (for review/research)"],
+      "operational_context": "Low overhead. Most expenses revolve around research materials and the physical environment used for focus."
+    },
+    "web_developer": {
+      "display_name": "Web Developer / Frontend Engineer",
+      "industry": "Web Development",
+      "primary_activities": ["Building websites", "UI implementation", "CMS customization", "Client QA and handoff"],
+      "ordinary_expenses": ["Domain/hosting for portfolio", "UI component libraries", "Browser testing tools", "Design-to-code tools (Figma)", "Version control platforms"],
+      "gray_areas": ["Personal project hosting costs", "Courses for tangential languages", "Second monitors", "Desk accessories"],
+      "operational_context": "Project-based income with frequent tool and framework churn. Home office is the primary workspace; fast internet is non-negotiable."
+    },
+    "seo_digital_marketer": {
+      "display_name": "SEO Specialist / Digital Marketer",
+      "industry": "Digital Marketing",
+      "primary_activities": ["Keyword research", "On-page optimization", "Link building", "Paid ad management", "Analytics reporting"],
+      "ordinary_expenses": ["Ahrefs/SEMrush/Moz subscriptions", "Google Ads spend (on behalf of clients)", "Landing page builders", "Email marketing platforms", "Rank tracking tools"],
+      "gray_areas": ["Personal website hosting billed as 'test environment'", "Courses on adjacent platforms", "Podcast/newsletter subscriptions for research"],
+      "operational_context": "Heavy reliance on SaaS tools with recurring costs. Managing client ad budgets can blur the line between business spending and pass-through expenses."
+    },
+    "social_media_manager": {
+      "display_name": "Social Media Manager",
+      "industry": "Social Media Marketing",
+      "primary_activities": ["Content scheduling", "Community management", "Campaign strategy", "Analytics reporting", "Influencer coordination"],
+      "ordinary_expenses": ["Scheduling tools (Buffer/Hootsuite/Later)", "Canva Pro", "Stock photo subscriptions", "Social listening tools", "Client CRM"],
+      "gray_areas": ["Personal social media platform fees", "Branded merchandise for 'content'", "Dining/events for 'brand research'", "Streaming subscriptions for trend monitoring"],
+      "operational_context": "Always-on nature of social media makes after-hours work common. The tool stack is entirely subscription-based and essential."
+    },
+    "video_editor": {
+      "display_name": "Video Editor / Motion Graphics Artist",
+      "industry": "Video Production",
+      "primary_activities": ["Cutting and assembling footage", "Color grading", "Motion graphics", "Audio mixing", "Client revisions"],
+      "ordinary_expenses": ["Adobe Premiere/DaVinci Resolve", "After Effects / Motion", "Stock music and SFX licenses", "External SSDs and NAS storage", "GPU upgrades"],
+      "gray_areas": ["4K monitor (dual purpose personal/work)", "High-end headphones", "Streaming subscriptions for reference", "Ergonomic chair"],
+      "operational_context": "Render times are hardware-dependent, making top-tier GPU and storage investments directly tied to productivity. File sizes make fast internet and large storage critical."
+    },
+    "ai_ml_specialist": {
+      "display_name": "AI / Machine Learning Specialist",
+      "industry": "Artificial Intelligence",
+      "primary_activities": ["Model training and fine-tuning", "Data pipeline building", "LLM integration", "AI strategy consulting"],
+      "ordinary_expenses": ["Cloud compute (GPU instances on AWS/GCP)", "ML platform subscriptions (Weights & Biases, Hugging Face)", "API costs (OpenAI, Anthropic, etc.)", "Datasets and data labeling tools", "Specialized hardware (GPUs)"],
+      "gray_areas": ["Personal AI tool subscriptions used partly for work", "High-end gaming GPU dual-purposed for ML", "Conference attendance", "Research paper access"],
+      "operational_context": "Compute costs are the dominant expense and scale with project size. Cloud bills can spike dramatically. Staying current requires constant investment in courses and conferences."
+    },
+    "cybersecurity_specialist": {
+      "display_name": "Cybersecurity Specialist / Penetration Tester",
+      "industry": "Cybersecurity",
+      "primary_activities": ["Penetration testing", "Vulnerability assessments", "Security audits", "Incident response", "Client reporting"],
+      "ordinary_expenses": ["Kali Linux / security OS licenses", "VPN services", "Penetration testing lab (virtual machines)", "Certifications (OSCP, CEH, CISSP)", "Cybersecurity news and threat intel subscriptions"],
+      "gray_areas": ["Personal VPN subscriptions", "Networking hardware for home lab", "Hacking/CTF platform subscriptions (HackTheBox, TryHackMe)", "Books on exploits and vulnerabilities"],
+      "operational_context": "Certifications are major recurring costs and directly tied to billing rates. Home lab hardware (servers, network gear) is legitimately required for skill maintenance and client simulations."
+    },
+    "online_tutor_course_creator": {
+      "display_name": "Online Tutor / Course Creator",
+      "industry": "Education and E-Learning",
+      "primary_activities": ["Live tutoring sessions", "Curriculum design", "Video course recording", "Student progress tracking", "Platform management"],
+      "ordinary_expenses": ["Course hosting platforms (Teachable/Kajabi/Thinkific)", "Video recording equipment", "Screen recording software (Camtasia/Loom)", "Whiteboard apps", "Scheduling and payment tools"],
+      "gray_areas": ["Books and textbooks for 'research'", "Subscriptions to courses taken for 'curriculum inspiration'", "Dedicated tutoring room setup/decor", "Streaming services for educational content"],
+      "operational_context": "Income is often platform-dependent with revenue share. Studio setup quality directly impacts course pricing. Platform fees and revenue splits must be tracked carefully."
+    },
+    "bookkeeper_virtual_cfo": {
+      "display_name": "Freelance Bookkeeper / Virtual CFO",
+      "industry": "Accounting and Finance",
+      "primary_activities": ["Client bookkeeping", "Financial reporting", "Tax preparation support", "Cash flow analysis", "Payroll processing"],
+      "ordinary_expenses": ["QuickBooks/Xero/FreshBooks subscriptions", "CPE (continuing professional education)", "Tax prep software", "Secure file transfer tools", "Professional liability (E&O) insurance"],
+      "gray_areas": ["Home office dedicated space", "Multiple monitor setup", "Financial news subscriptions", "Courses in adjacent tax law areas"],
+      "operational_context": "Handles sensitive client financial data, requiring robust security and software tools. CPE credits are mandatory to maintain credentials and are fully deductible."
+    },
+    "translator_interpreter": {
+      "display_name": "Translator / Interpreter",
+      "industry": "Language Services",
+      "primary_activities": ["Document translation", "Live interpretation", "Localization", "Subtitling and transcription", "Proofreading in target language"],
+      "ordinary_expenses": ["CAT tools (SDL Trados, MemoQ)", "Terminology management databases", "Specialized dictionaries and glossaries", "Secure document handling software", "Professional memberships (ATA)"],
+      "gray_areas": ["Language-learning app subscriptions", "Foreign language media (streaming, newspapers)", "Travel to immerse in target culture", "Dual-language books"],
+      "operational_context": "Highly niche software tools (CAT tools) are industry-standard and legitimately deductible. Foreign media subscriptions have a strong business case for maintaining fluency and cultural accuracy."
+    },
+    "ux_ui_designer": {
+      "display_name": "UX/UI Designer",
+      "industry": "User Experience Design",
+      "primary_activities": ["User research", "Wireframing and prototyping", "Usability testing", "Design system maintenance", "Stakeholder presentations"],
+      "ordinary_expenses": ["Figma/Sketch/Adobe XD", "UserTesting or Maze platform fees", "Prototyping tools (InVision, Framer)", "Icon and asset libraries", "Portfolio hosting"],
+      "gray_areas": ["App subscriptions for 'UX benchmarking'", "Consumer gadgets to study UX patterns", "Books on psychology and behavior", "Conference workshops"],
+      "operational_context": "Tool costs are subscription-heavy and essential. Staying fluent in consumer app design trends requires ongoing product usage, which blurs personal and professional use."
+    }
+  }
+}

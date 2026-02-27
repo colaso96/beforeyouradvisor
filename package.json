@@ -1,0 +1,15 @@
+{
+  "name": "writeoffs-gpt",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run -ws build",
+    "dev": "npm run -w apps/api dev",
+    "lint": "npm run -ws lint",
+    "test": "npm run -ws test"
+  }
+}
