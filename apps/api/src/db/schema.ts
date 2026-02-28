@@ -54,6 +54,34 @@ export async function ensureSchema(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS transaction_chat_messages (
+      id UUID PRIMARY KEY,
+      user_id UUID REFERENCES users(id) NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+      content TEXT NOT NULL,
+      sql_text TEXT,
+      result_json JSONB,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS analysis_payment_sessions (
+      id UUID PRIMARY KEY,
+      user_id UUID REFERENCES users(id) NOT NULL,
+      stripe_session_id TEXT UNIQUE NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('created', 'paid', 'consumed', 'expired', 'failed')),
+      ingestion_job_id UUID REFERENCES ingestion_jobs(id),
+      analysis_note TEXT,
+      analysis_job_id UUID REFERENCES analysis_jobs(id),
+      paid_at TIMESTAMPTZ,
+      consumed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE INDEX IF NOT EXISTS idx_transactions_user_category ON transactions(user_id, llm_category);
+    CREATE INDEX IF NOT EXISTS idx_transaction_chat_messages_user_created_at
+      ON transaction_chat_messages(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_analysis_payment_sessions_user_created_at
+      ON analysis_payment_sessions(user_id, created_at DESC);
   `);
 }

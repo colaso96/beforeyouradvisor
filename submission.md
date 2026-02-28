@@ -9,6 +9,8 @@ The user connects Google Drive, uploads exported statements, and gets categorize
 - Support for mixed source formats (Chase CSV, Amex CSV, Coinbase PDF).
 - Business-context-aware classification using selected business profile + aggressiveness setting.
 - Progress visibility for ingestion and analysis jobs, plus downloadable results.
+- Downloadable CSV to store for local records
+- Chat with your data application for further analysis
 
 ## End-to-End Flow
 
@@ -44,8 +46,8 @@ The user connects Google Drive, uploads exported statements, and gets categorize
 - Transaction reset on re-ingest / classification reset on re-analysis:
   Chooses data consistency and reproducibility over incremental merge complexity.
 
-## Why These Tradeoffs Make Sense
+## Tradeoffs
 
 - The system is optimized for correctness, traceability, and shipping velocity in an MVP.
-- It intentionally uses a simple in-process queue first, which is easy to reason about and sufficient for early-stage load.
+- It intentionally uses a simple in-process queue first, which is easy to reason about and sufficient for early-stage load.  Redis could be added later if needed for scale
 - The architecture leaves clear upgrade paths (external queue, more adapters, richer analysis) without reworking core contracts.

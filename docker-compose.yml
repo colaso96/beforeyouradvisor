@@ -6,16 +6,16 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: writeoffs_gpt
+      POSTGRES_DB: beforeyouradvisor_pgdata
     ports:
       - "5433:5432"
     volumes:
-      - writeoffs_pgdata:/var/lib/postgresql/data
+      - beforeyouradvisor_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d writeoffs_gpt"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d beforeyouradvisor"]
       interval: 5s
       timeout: 3s
       retries: 20
 
 volumes:
-  writeoffs_pgdata:
+  beforeyouradvisor_pgdata:

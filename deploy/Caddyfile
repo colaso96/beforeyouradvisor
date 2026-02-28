@@ -1,0 +1,12 @@
+{
+    email colecrescas@gmail.com
+}
+
+www.beforeyouradvisor.com {
+  redir https://beforeyouradvisor.com{uri} permanent
+}
+
+beforeyouradvisor.com {
+  encode gzip zstd
+  reverse_proxy app:4000
+}

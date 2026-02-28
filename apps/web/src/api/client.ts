@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:4000";
+const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? "http://localhost:4000" : "");
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -79,6 +79,26 @@ export type TransactionSummaryRow = {
   totalCount: number;
 };
 
+export type TransactionChatResultTable = {
+  columns: string[];
+  rows: Record<string, unknown>[];
+};
+
+export type TransactionChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  sql: string | null;
+  resultTable: TransactionChatResultTable | null;
+  createdAt: string;
+};
+
+export type TransactionChatEligibility = {
+  eligible: boolean;
+  transactionCount: number;
+  minRequired: number;
+};
+
 export type IngestionStartResponse = {
   jobId: string;
   state: string;
@@ -91,6 +111,16 @@ export type AnalysisStartResponse = {
   state: string;
   refreshed: boolean;
   clearedClassifications: number;
+};
+
+export type AnalysisCheckoutStartResponse = {
+  checkoutUrl: string;
+  checkoutSessionId: string;
+};
+
+export type AnalysisCheckoutVerifyResponse = {
+  success: boolean;
+  metadata?: Record<string, string>;
 };
 
 type TransactionsQuery = {
@@ -127,9 +157,30 @@ export const api = {
     if (trimmedNote) body.analysisNote = trimmedNote;
     return request<AnalysisStartResponse>("/api/analysis/start", { method: "POST", body: JSON.stringify(body) });
   },
+  startAnalysisCheckout: (input?: { ingestionJobId?: string; analysisNote?: string }) => {
+    const body: { ingestionJobId?: string; analysisNote?: string } = {};
+    if (input?.ingestionJobId) body.ingestionJobId = input.ingestionJobId;
+    const trimmedNote = input?.analysisNote?.trim();
+    if (trimmedNote) body.analysisNote = trimmedNote;
+    return request<AnalysisCheckoutStartResponse>("/api/analysis/checkout/start", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+  finalizeAnalysisCheckout: (checkoutSessionId: string) =>
+    request<AnalysisStartResponse>("/api/analysis/checkout/finalize", {
+      method: "POST",
+      body: JSON.stringify({ checkoutSessionId }),
+    }),
+  verifyAnalysisCheckout: (checkoutSessionId: string) =>
+    request<AnalysisCheckoutVerifyResponse>(`/api/verify-session?session_id=${encodeURIComponent(checkoutSessionId)}`),
   analysisStatus: (jobId: string) => request<JobStatus>(`/api/analysis/status/${jobId}`),
   transactionsSummary: () => request<{ rows: TransactionSummaryRow[] }>("/api/transactions/summary"),
   transactions: (query?: TransactionsQuery) => request<{ rows: TransactionRow[] }>(buildTransactionsQuery(query)),
+  transactionChatEligibility: () => request<TransactionChatEligibility>("/api/transactions/chat/eligibility"),
+  clearTransactionChatHistory: () => request<void>("/api/transactions/chat/history", { method: "DELETE" }),
+  sendTransactionChatMessage: (message: string) =>
+    request<{ row: TransactionChatMessage }>("/api/transactions/chat", { method: "POST", body: JSON.stringify({ message }) }),
   downloadTransactionsCsv: () => requestBlob("/api/transactions/export.csv"),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
   authUrl: `${API_BASE}/auth/google`,
