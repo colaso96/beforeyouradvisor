@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: writeoffs-postgres
+    container_name: beforeyouradvisor-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -12,7 +12,7 @@ services:
     volumes:
       - beforeyouradvisor_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d beforeyouradvisor"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d beforeyouradvisor_pgdata"]
       interval: 5s
       timeout: 3s
       retries: 20

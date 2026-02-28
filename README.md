@@ -1,4 +1,4 @@
-# Deductions GPT
+# BeforeYourAdvisor
 
 Monorepo implementation of the AI Financial Statement Classifier plan.
 

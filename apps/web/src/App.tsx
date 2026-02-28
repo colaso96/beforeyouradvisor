@@ -67,6 +67,16 @@ const sampleCategoryTotals = [
   { category: "Meals", total: "$9.75", deductible: "$0.00", nonDeductible: "$9.75", count: 1 },
 ] as const;
 
+const legalFooter = (
+  <section className="section-spacer page-legal">
+    <p className="muted legal-links">
+      <a href="/privacy-policy">Privacy Policy</a>
+      <span>•</span>
+      <a href="/terms-of-service">Terms of Service</a>
+    </p>
+  </section>
+);
+
 export function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
@@ -421,7 +431,14 @@ export function App() {
     [availableBusinessTypeKeys, businessType, aggressivenessLevel],
   );
 
-  if (loading) return <main className="app-shell">Loading...</main>;
+  if (loading) {
+    return (
+      <main className="app-shell">
+        <p>Loading...</p>
+        {legalFooter}
+      </main>
+    );
+  }
 
   if (!me) {
     return (
@@ -507,6 +524,7 @@ export function App() {
             </div>
           </article>
         </section>
+        {legalFooter}
       </main>
     );
   }
@@ -905,6 +923,7 @@ export function App() {
           </article>
         </section>
       ) : null}
+      {legalFooter}
       <ToastViewport toasts={toasts} onDismiss={dismissToast} />
     </main>
   );
