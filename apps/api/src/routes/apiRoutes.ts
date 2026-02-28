@@ -1,12 +1,25 @@
 import { randomUUID } from "node:crypto";
-import { Router } from "express";
-import { analysisStartSchema, ingestionStartSchema, profileSchema } from "@writeoffs/shared";
+import { type Request, type Response, Router } from "express";
+import {
+  analysisCheckoutFinalizeSchema,
+  analysisCheckoutStartSchema,
+  analysisStartSchema,
+  ingestionStartSchema,
+  profileSchema,
+  transactionChatSendSchema,
+} from "@writeoffs/shared";
 import { query } from "../db/client.js";
 import { requireAuth } from "./middleware.js";
 import { extractDriveFolderId } from "../utils/folderId.js";
 import { enqueueAnalysis, enqueueIngestion } from "../jobs/queue.js";
 import { isCanonicalBusinessProfileKey, listBusinessProfileOptions } from "../services/businessProfileService.js";
 import { normalizeCategory } from "../utils/category.js";
+import { env } from "../config/env.js";
+import {
+  clearTransactionChatHistory,
+  getTransactionChatEligibility,
+  sendTransactionChatMessage,
+} from "../services/transactionChatService.js";
 
 export const apiRouter = Router();
 
@@ -16,6 +29,239 @@ function csvEscape(value: unknown): string {
   const stringValue = value == null ? "" : String(value);
   const escaped = stringValue.replace(/"/g, "\"\"");
   return `"${escaped}"`;
+}
+
+type AnalysisStartInput = {
+  ingestionJobId?: string;
+  analysisNote?: string;
+};
+
+type AnalysisStartOutcome = {
+  jobId: string;
+  state: "queued";
+  refreshed: boolean;
+  clearedClassifications: number;
+};
+
+type IngestionLookupRow = {
+  id: string;
+  status: string;
+};
+
+type UserConfigRow = {
+  businessType: string | null;
+  aggressivenessLevel: string | null;
+};
+
+type AnalysisPaymentRow = {
+  id: string;
+  userId: string;
+  stripeSessionId: string;
+  status: "created" | "paid" | "consumed" | "expired" | "failed";
+  ingestionJobId: string | null;
+  analysisNote: string | null;
+  analysisJobId: string | null;
+};
+
+type AnalysisJobStatusRow = {
+  jobId: string;
+  state: "queued" | "running" | "completed" | "failed";
+  processed: number;
+  total: number;
+  error: string | null;
+};
+
+const defaultSuccessUrl = `${env.APP_ORIGIN}/?checkout_session_id={CHECKOUT_SESSION_ID}`;
+const defaultCancelUrl = `${env.APP_ORIGIN}/?checkout_cancelled=1`;
+const ANALYSIS_CHECKOUT_PRICE_CENTS = 1000;
+const ANALYSIS_CHECKOUT_PRODUCT_NAME = "AI Analysis";
+
+type StripeCheckoutSession = {
+  id: string;
+  url: string | null;
+  mode: string | null;
+  payment_status: string | null;
+  metadata: Record<string, string> | null;
+};
+
+function ensureStripeConfiguration(): void {
+  if (env.STRIPE_SECRET_KEY === "sk_test_placeholder") {
+    throw new Error("STRIPE_SECRET_KEY is not configured. Update your .env file.");
+  }
+}
+
+async function stripeCreateCheckoutSession(input: {
+  successUrl: string;
+  cancelUrl: string;
+  userId: string;
+  ingestionJobId: string;
+  analysisNote?: string;
+}): Promise<StripeCheckoutSession> {
+  ensureStripeConfiguration();
+  const form = new URLSearchParams();
+  form.set("mode", "payment");
+  form.set("line_items[0][price_data][currency]", "usd");
+  form.set("line_items[0][price_data][unit_amount]", String(ANALYSIS_CHECKOUT_PRICE_CENTS));
+  form.set("line_items[0][price_data][product_data][name]", ANALYSIS_CHECKOUT_PRODUCT_NAME);
+  form.set("line_items[0][quantity]", "1");
+  form.set("success_url", input.successUrl);
+  form.set("cancel_url", input.cancelUrl);
+  form.set("metadata[userId]", input.userId);
+  form.set("metadata[ingestionJobId]", input.ingestionJobId);
+  if (input.analysisNote) {
+    form.set("metadata[analysisNote]", input.analysisNote);
+  }
+
+  const response = await fetch("https://api.stripe.com/v1/checkout/sessions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: form.toString(),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Stripe checkout session create failed (${response.status}): ${body.slice(0, 300)}`);
+  }
+
+  return (await response.json()) as StripeCheckoutSession;
+}
+
+async function stripeRetrieveCheckoutSession(checkoutSessionId: string): Promise<StripeCheckoutSession> {
+  ensureStripeConfiguration();
+  const response = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(checkoutSessionId)}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Stripe checkout session retrieve failed (${response.status}): ${body.slice(0, 300)}`);
+  }
+
+  return (await response.json()) as StripeCheckoutSession;
+}
+
+async function findAnalysisPaymentSession(userId: string, checkoutSessionId: string): Promise<AnalysisPaymentRow | null> {
+  const existing = await query<AnalysisPaymentRow>(
+    `SELECT id,
+            user_id AS "userId",
+            stripe_session_id AS "stripeSessionId",
+            status,
+            ingestion_job_id AS "ingestionJobId",
+            analysis_note AS "analysisNote",
+            analysis_job_id AS "analysisJobId"
+     FROM analysis_payment_sessions
+     WHERE stripe_session_id = $1
+       AND user_id = $2`,
+    [checkoutSessionId, userId],
+  );
+  return existing.rows[0] ?? null;
+}
+
+async function findAnalysisJobStatus(userId: string, jobId: string): Promise<AnalysisJobStatusRow | null> {
+  const status = await query<AnalysisJobStatusRow>(
+    `SELECT id AS "jobId", status AS state, processed, total, error
+     FROM analysis_jobs
+     WHERE id = $1
+       AND user_id = $2`,
+    [jobId, userId],
+  );
+  return status.rows[0] ?? null;
+}
+
+async function startAnalysisCheckoutForUser(
+  userId: string,
+  input: { ingestionJobId?: string; analysisNote?: string },
+): Promise<{ checkoutUrl: string; checkoutSessionId: string }> {
+  const preflight = await requireAnalysisPrerequisites(userId, input);
+
+  const checkout = await stripeCreateCheckoutSession({
+    successUrl: env.STRIPE_SUCCESS_URL ?? defaultSuccessUrl,
+    cancelUrl: env.STRIPE_CANCEL_URL ?? defaultCancelUrl,
+    userId,
+    ingestionJobId: preflight.ingestionJobId,
+    analysisNote: preflight.analysisNote,
+  });
+
+  const paymentId = randomUUID();
+  await query(
+    `INSERT INTO analysis_payment_sessions (id, user_id, stripe_session_id, status, ingestion_job_id, analysis_note)
+     VALUES ($1, $2, $3, 'created', $4, $5)`,
+    [paymentId, userId, checkout.id, preflight.ingestionJobId, preflight.analysisNote ?? null],
+  );
+
+  if (!checkout.url) {
+    throw new Error("Stripe did not return a checkout URL.");
+  }
+
+  return { checkoutUrl: checkout.url, checkoutSessionId: checkout.id };
+}
+
+async function requireAnalysisPrerequisites(userId: string, input: AnalysisStartInput): Promise<{ ingestionJobId: string; analysisNote?: string }> {
+  const requestedIngestionJobId = input.ingestionJobId;
+  const analysisNote = input.analysisNote?.trim() || undefined;
+  const ingestion = requestedIngestionJobId
+    ? await query<IngestionLookupRow>("SELECT id, status FROM ingestion_jobs WHERE id = $1 AND user_id = $2", [requestedIngestionJobId, userId])
+    : await query<IngestionLookupRow>(
+        `SELECT id, status
+         FROM ingestion_jobs
+         WHERE user_id = $1
+           AND status = 'completed'
+         ORDER BY updated_at DESC, created_at DESC
+         LIMIT 1`,
+        [userId],
+      );
+
+  if (!ingestion.rowCount || ingestion.rows[0]?.status !== "completed") {
+    throw new Error("A completed ingestion run is required before analysis.");
+  }
+
+  const userConfig = await query<UserConfigRow>(
+    `SELECT business_type AS "businessType", aggressiveness_level AS "aggressivenessLevel"
+     FROM users
+     WHERE id = $1`,
+    [userId],
+  );
+  const config = userConfig.rows[0];
+  if (!config?.businessType || !config.aggressivenessLevel || !isCanonicalBusinessProfileKey(config.businessType)) {
+    throw new Error("Profile must be saved with a valid business role before analysis.");
+  }
+
+  return {
+    ingestionJobId: ingestion.rows[0]!.id,
+    analysisNote,
+  };
+}
+
+async function enqueueAnalysisStart(userId: string, input: AnalysisStartInput): Promise<AnalysisStartOutcome> {
+  const preflight = await requireAnalysisPrerequisites(userId, input);
+  const cleared = await query(
+    `UPDATE transactions
+     SET llm_category = NULL, is_deductible = NULL, llm_reasoning = NULL, updated_at = NOW()
+     WHERE user_id = $1
+       AND (llm_category IS NOT NULL OR is_deductible IS NOT NULL OR llm_reasoning IS NOT NULL)`,
+    [userId],
+  );
+  const clearedClassifications = cleared.rowCount ?? 0;
+
+  const jobId = randomUUID();
+  console.info(`[analysis:${jobId}] start requested by user=${userId}`);
+  await query(
+    `INSERT INTO analysis_jobs (id, user_id, status)
+     VALUES ($1, $2, 'queued')`,
+    [jobId, userId],
+  );
+
+  enqueueAnalysis({ jobId, userId, analysisNote: preflight.analysisNote });
+  if (clearedClassifications > 0) {
+    console.info(`[analysis:${jobId}] cleared previous classifications user=${userId} count=${clearedClassifications}`);
+  }
+  return { jobId, state: "queued", refreshed: clearedClassifications > 0, clearedClassifications };
 }
 
 apiRouter.get("/business-profiles", async (_req, res) => {
@@ -125,63 +371,184 @@ apiRouter.post("/analysis/start", async (req, res) => {
     return;
   }
 
-  const requestedIngestionJobId = parsed.data.ingestionJobId;
-  const analysisNote = parsed.data.analysisNote?.trim() || undefined;
-  const ingestion = requestedIngestionJobId
-    ? await query<{ id: string; status: string }>(
-        "SELECT id, status FROM ingestion_jobs WHERE id = $1 AND user_id = $2",
-        [requestedIngestionJobId, req.user!.id],
-      )
-    : await query<{ id: string; status: string }>(
-        `SELECT id, status
-         FROM ingestion_jobs
-         WHERE user_id = $1
-           AND status = 'completed'
-         ORDER BY updated_at DESC, created_at DESC
-         LIMIT 1`,
-        [req.user!.id],
-      );
-
-  if (!ingestion.rowCount || ingestion.rows[0]?.status !== "completed") {
-    res.status(400).json({ error: "A completed ingestion run is required before analysis." });
-    return;
-  }
-
-  const userConfig = await query<{ businessType: string | null; aggressivenessLevel: string | null }>(
-    `SELECT business_type AS "businessType", aggressiveness_level AS "aggressivenessLevel"
-     FROM users
-     WHERE id = $1`,
-    [req.user!.id],
-  );
-  const config = userConfig.rows[0];
-  if (!config?.businessType || !config.aggressivenessLevel || !isCanonicalBusinessProfileKey(config.businessType)) {
-    res.status(400).json({ error: "Profile must be saved with a valid business role before analysis." });
-    return;
-  }
-
-  const cleared = await query(
-    `UPDATE transactions
-     SET llm_category = NULL, is_deductible = NULL, llm_reasoning = NULL, updated_at = NOW()
-     WHERE user_id = $1
-       AND (llm_category IS NOT NULL OR is_deductible IS NOT NULL OR llm_reasoning IS NOT NULL)`,
-    [req.user!.id],
-  );
-  const clearedClassifications = cleared.rowCount ?? 0;
-
-  const jobId = randomUUID();
-  console.info(`[analysis:${jobId}] start requested by user=${req.user!.id}`);
-  await query(
-    `INSERT INTO analysis_jobs (id, user_id, status)
-     VALUES ($1, $2, 'queued')`,
-    [jobId, req.user!.id],
-  );
-
-  enqueueAnalysis({ jobId, userId: req.user!.id, analysisNote });
-  if (clearedClassifications > 0) {
-    console.info(`[analysis:${jobId}] cleared previous classifications user=${req.user!.id} count=${clearedClassifications}`);
-  }
-  res.status(202).json({ jobId, state: "queued", refreshed: clearedClassifications > 0, clearedClassifications });
+  res.status(402).json({
+    error: "Payment is required before running analysis. Use /api/analysis/checkout/start.",
+  });
 });
+
+async function handleAnalysisCheckoutStart(req: Request, res: Response): Promise<void> {
+  const parsed = analysisCheckoutStartSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+
+  try {
+    const checkout = await startAnalysisCheckoutForUser(req.user!.id, parsed.data);
+    res.status(201).json(checkout);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to start checkout";
+    if (/required before analysis|Profile must be saved/i.test(message)) {
+      res.status(400).json({ error: message });
+      return;
+    }
+    if (/Stripe|STRIPE_/i.test(message)) {
+      res.status(502).json({ error: message });
+      return;
+    }
+    res.status(500).json({ error: message });
+    return;
+  }
+}
+
+apiRouter.post("/analysis/checkout/start", handleAnalysisCheckoutStart);
+apiRouter.post("/create-checkout-session", handleAnalysisCheckoutStart);
+
+apiRouter.get("/verify-session", async (req, res) => {
+  const sessionId = typeof req.query.session_id === "string" ? req.query.session_id.trim() : "";
+  if (!sessionId) {
+    res.status(400).json({ error: "session_id query parameter is required." });
+    return;
+  }
+
+  const payment = await findAnalysisPaymentSession(req.user!.id, sessionId);
+  if (!payment) {
+    res.status(404).json({ error: "Checkout session not found." });
+    return;
+  }
+
+  let session: StripeCheckoutSession;
+  try {
+    session = await stripeRetrieveCheckoutSession(sessionId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to verify checkout session";
+    res.status(502).json({ error: message });
+    return;
+  }
+
+  if (session.mode !== "payment" || session.payment_status !== "paid") {
+    res.json({ success: false });
+    return;
+  }
+
+  if (session.metadata?.userId && session.metadata.userId !== req.user!.id) {
+    res.status(403).json({ error: "Checkout session ownership mismatch." });
+    return;
+  }
+
+  await query(
+    `UPDATE analysis_payment_sessions
+     SET status = CASE WHEN status = 'created' THEN 'paid' ELSE status END,
+         paid_at = COALESCE(paid_at, NOW()),
+         updated_at = NOW()
+     WHERE id = $1`,
+    [payment.id],
+  );
+
+  const metadata: Record<string, string> = {
+    ...(session.metadata ?? {}),
+    userId: req.user!.id,
+  };
+  if (payment.ingestionJobId) {
+    metadata.ingestionJobId = payment.ingestionJobId;
+  }
+  if (payment.analysisNote) {
+    metadata.analysisNote = payment.analysisNote;
+  }
+
+  res.json({ success: true, metadata });
+});
+
+async function handleAnalysisCheckoutFinalize(req: Request, res: Response): Promise<void> {
+  const parsed = analysisCheckoutFinalizeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+
+  const payment = await findAnalysisPaymentSession(req.user!.id, parsed.data.checkoutSessionId);
+  if (!payment) {
+    res.status(404).json({ error: "Checkout session not found." });
+    return;
+  }
+
+  if (payment.analysisJobId) {
+    const status = await findAnalysisJobStatus(req.user!.id, payment.analysisJobId);
+    if (status) {
+      res.status(200).json({ ...status, refreshed: false, clearedClassifications: 0 });
+      return;
+    }
+  }
+
+  let session: StripeCheckoutSession;
+  try {
+    session = await stripeRetrieveCheckoutSession(parsed.data.checkoutSessionId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to verify checkout session";
+    res.status(502).json({ error: message });
+    return;
+  }
+
+  if (session.mode !== "payment" || session.payment_status !== "paid") {
+    res.status(400).json({ error: "Checkout session is not paid." });
+    return;
+  }
+  if (session.metadata?.userId && session.metadata.userId !== req.user!.id) {
+    res.status(403).json({ error: "Checkout session ownership mismatch." });
+    return;
+  }
+
+  await query(
+    `UPDATE analysis_payment_sessions
+     SET status = CASE WHEN status = 'created' THEN 'paid' ELSE status END,
+         paid_at = COALESCE(paid_at, NOW()),
+         updated_at = NOW()
+     WHERE id = $1`,
+    [payment.id],
+  );
+
+  let started: AnalysisStartOutcome;
+  try {
+    started = await enqueueAnalysisStart(req.user!.id, {
+      ingestionJobId: payment.ingestionJobId ?? undefined,
+      analysisNote: payment.analysisNote ?? undefined,
+    });
+  } catch (error) {
+    await query(
+      `UPDATE analysis_payment_sessions
+       SET status = 'failed', updated_at = NOW()
+       WHERE id = $1`,
+      [payment.id],
+    );
+    const message = error instanceof Error ? error.message : "Unable to start analysis";
+    res.status(400).json({ error: message });
+    return;
+  }
+
+  const consumed = await query(
+    `UPDATE analysis_payment_sessions
+     SET status = 'consumed', analysis_job_id = $1, consumed_at = NOW(), updated_at = NOW()
+     WHERE id = $2
+       AND analysis_job_id IS NULL`,
+    [started.jobId, payment.id],
+  );
+
+  if (!consumed.rowCount) {
+    const latestJobId = (await findAnalysisPaymentSession(req.user!.id, parsed.data.checkoutSessionId))?.analysisJobId;
+    if (latestJobId) {
+      const status = await findAnalysisJobStatus(req.user!.id, latestJobId);
+      if (status) {
+        res.status(200).json({ ...status, refreshed: false, clearedClassifications: 0 });
+        return;
+      }
+    }
+  }
+
+  res.status(202).json(started);
+}
+
+apiRouter.post("/analysis/checkout/finalize", handleAnalysisCheckoutFinalize);
+apiRouter.post("/run-analysis", handleAnalysisCheckoutFinalize);
 
 apiRouter.get("/analysis/status/:jobId", async (req, res) => {
   const result = await query(
@@ -426,4 +793,30 @@ apiRouter.get("/transactions", async (req, res) => {
     llmCategory: row.llmCategory == null ? null : normalizeCategory(row.llmCategory),
   }));
   res.json({ rows: normalizedRows });
+});
+
+apiRouter.get("/transactions/chat/eligibility", async (req, res) => {
+  const payload = await getTransactionChatEligibility(req.user!.id);
+  res.json(payload);
+});
+
+apiRouter.delete("/transactions/chat/history", async (req, res) => {
+  await clearTransactionChatHistory(req.user!.id);
+  res.status(204).send();
+});
+
+apiRouter.post("/transactions/chat", async (req, res) => {
+  const parsed = transactionChatSendSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+
+  try {
+    const row = await sendTransactionChatMessage({ userId: req.user!.id, message: parsed.data.message });
+    res.status(201).json({ row });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to send chat message";
+    res.status(400).json({ error: message });
+  }
 });

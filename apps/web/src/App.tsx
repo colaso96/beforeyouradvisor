@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, type BusinessProfileOption, type JobStatus, type Me, type TransactionRow, type TransactionSummaryRow } from "./api/client";
+import {
+  api,
+  type BusinessProfileOption,
+  type JobStatus,
+  type Me,
+  type TransactionChatEligibility,
+  type TransactionChatMessage,
+  type TransactionRow,
+  type TransactionSummaryRow,
+} from "./api/client";
 import { ToastViewport, useToastController } from "./toast";
 
 const levels = ["CONSERVATIVE", "MODERATE", "AGGRESSIVE"] as const;
@@ -72,10 +81,19 @@ export function App() {
   const [analysisJobId, setAnalysisJobId] = useState<string | null>(null);
   const [ingestionStatus, setIngestionStatus] = useState<JobStatus | null>(null);
   const [analysisStatus, setAnalysisStatus] = useState<JobStatus | null>(null);
+  const [analysisCheckoutProcessing, setAnalysisCheckoutProcessing] = useState(false);
   const [downloadingCsv, setDownloadingCsv] = useState(false);
   const [needsReauth, setNeedsReauth] = useState(false);
   const [transactions, setTransactions] = useState<TransactionRow[]>([]);
   const [summaryRows, setSummaryRows] = useState<TransactionSummaryRow[]>([]);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatSending, setChatSending] = useState(false);
+  const [chatInitialized, setChatInitialized] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [chatEligibility, setChatEligibility] = useState<TransactionChatEligibility | null>(null);
+  const [chatMessages, setChatMessages] = useState<TransactionChatMessage[]>([]);
   const { toasts, notify, dismissToast } = useToastController();
   const lastIngestionState = useRef<JobStatus["state"] | null>(null);
   const lastAnalysisState = useRef<JobStatus["state"] | null>(null);
@@ -119,6 +137,54 @@ export function App() {
     });
   }
 
+  function initializeAnalysisJob(started: { jobId: string; refreshed: boolean; clearedClassifications: number }): void {
+    if (started.refreshed) {
+      notify({
+        kind: "info",
+        title: "Refreshing AI analysis",
+        message: `Cleared ${started.clearedClassifications} previous classifications before rerun.`,
+        durationMs: 4500,
+      });
+    }
+    setAnalysisJobId(started.jobId);
+    setAnalysisStatus({ jobId: started.jobId, state: "queued", processed: 0, total: 0, error: null });
+    setTransactions([]);
+    setSummaryRows([]);
+    setChatMessages([]);
+    lastAnalysisState.current = null;
+    notify({
+      key: "analysis-progress",
+      kind: "info",
+      title: "Running analysis",
+      message: "Starting batch analysis...",
+      persistent: true,
+    });
+  }
+
+  function formatChatCell(value: unknown): string {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  async function loadTransactionChatData(): Promise<void> {
+    setChatLoading(true);
+    try {
+      const eligibility = await api.transactionChatEligibility();
+      setChatEligibility(eligibility);
+      setChatInitialized(true);
+    } catch (error) {
+      setChatError(getErrorMessage(error));
+    } finally {
+      setChatLoading(false);
+    }
+  }
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -132,15 +198,17 @@ export function App() {
         setBusinessType(selectedBusinessType);
         setAggressivenessLevel(user.aggressivenessLevel ?? "MODERATE");
 
-        const [classifiedTx, summary] = await Promise.all([
+        const [classifiedTx, summary, eligibility] = await Promise.all([
           api.transactions({ status: "classified", limit: ANALYSIS_SAMPLE_LIMIT, offset: 0 }),
           api.transactionsSummary(),
+          api.transactionChatEligibility(),
         ]);
 
         if (classifiedTx.rows.length > 0) {
           setTransactions(classifiedTx.rows);
         }
         setSummaryRows(summary.rows);
+        setChatEligibility(eligibility);
       } catch (e) {
         setMe(null);
         if (!isUnauthorizedError(e)) {
@@ -152,6 +220,62 @@ export function App() {
     };
     void load();
   }, [notify]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const checkoutSessionId = params.get("checkout_session_id");
+    const cancelled = params.get("checkout_cancelled") === "1";
+    if (!checkoutSessionId && !cancelled) return;
+
+    const clearQueryParams = () => {
+      window.history.replaceState({}, "", window.location.pathname);
+    };
+
+    if (cancelled) {
+      notify({
+        kind: "info",
+        title: "Checkout cancelled",
+        message: "No charge was made. You can retry when ready.",
+        durationMs: 3500,
+      });
+      clearQueryParams();
+      return;
+    }
+
+    let active = true;
+    const finalize = async () => {
+      setAnalysisCheckoutProcessing(true);
+      try {
+        notify({
+          key: "analysis-progress",
+          kind: "info",
+          title: "Verifying payment",
+          message: "Confirming checkout before analysis starts...",
+          persistent: true,
+        });
+        const verified = await api.verifyAnalysisCheckout(checkoutSessionId!);
+        if (!verified.success) {
+          throw new Error("Checkout has not been paid yet.");
+        }
+        const started = await api.finalizeAnalysisCheckout(checkoutSessionId!);
+        if (!active) return;
+        initializeAnalysisJob(started);
+      } catch (error) {
+        dismissToast("analysis-progress");
+        notifyError("Payment verification failed", error);
+      } finally {
+        if (active) {
+          setAnalysisCheckoutProcessing(false);
+          clearQueryParams();
+        }
+      }
+    };
+
+    void finalize();
+    return () => {
+      active = false;
+    };
+  }, [dismissToast, notify]);
 
   useEffect(() => {
     if (!ingestionJobId || needsReauth) return;
@@ -174,8 +298,12 @@ export function App() {
         const status = await api.analysisStatus(analysisJobId);
         setAnalysisStatus(status);
         if (status.state === "queued" || status.state === "running" || status.state === "completed") {
-          const tx = await api.transactions({ status: "classified", limit: ANALYSIS_SAMPLE_LIMIT, offset: 0 });
+          const [tx, eligibility] = await Promise.all([
+            api.transactions({ status: "classified", limit: ANALYSIS_SAMPLE_LIMIT, offset: 0 }),
+            api.transactionChatEligibility(),
+          ]);
           setTransactions(tx.rows);
+          setChatEligibility(eligibility);
         }
         if (status.state === "completed") {
           const summary = await api.transactionsSummary();
@@ -194,8 +322,9 @@ export function App() {
     if (ingestionStatus.processed < 1) return;
     const loadTransactions = async () => {
       try {
-        const tx = await api.transactions();
+        const [tx, eligibility] = await Promise.all([api.transactions(), api.transactionChatEligibility()]);
         setTransactions(tx.rows);
+        setChatEligibility(eligibility);
       } catch (e) {
         if (handleUnauthorized(e)) return;
         notifyError("Could not load transactions", e, "transactions-load-error");
@@ -298,99 +427,83 @@ export function App() {
     return (
       <main className="auth-shell">
         <section className="hero-card marketing-hero">
-          <h1>
-            Writeoffs GPT
-          </h1>
-          {/* <h2>
-            Maximize your year-end tax savings with AI powered expense categorization
-          </h2> */}
+          <p className="eyebrow">AI Expense Review</p>
+          <h1>Before Your Advisor</h1>
+          <p className="hero-subtitle">
+            Upload statements, review AI categorization, and send cleaner records to your tax professional.
+          </p>
           <div className="hero-actions">
             <a className="button" href={api.authUrl}>
               Log in with Google to start
             </a>
+            <p className="muted hero-footnote">Secure sign-in. One Drive folder connection to begin.</p>
           </div>
-
-          <footer className="hero-footer">
-            <p className="muted">
-              Upload statements to receive AI-driven deduction suggestions by category and run a full analysis.
-            </p>
-          </footer>
+          <div className="hero-stats">
+            <article className="hero-stat">
+              <strong>3-step flow</strong>
+              <span>Link data, set profile, run analysis</span>
+            </article>
+            <article className="hero-stat">
+              <strong>CSV export</strong>
+              <span>Share review-ready outputs with your advisor</span>
+            </article>
+            <article className="hero-stat">
+              <strong>Reasoning included</strong>
+              <span>Each classification includes an explainable note</span>
+            </article>
+          </div>
         </section>
 
         <section className="marketing-grid">
-          <article className="panel panel-full">
+          <article className="panel">
+            <h2>How It Works</h2>
+            <ol className="workflow-list">
+              <li>Connect a Google Drive folder with statement files.</li>
+              <li>Pick your business profile and risk level.</li>
+              <li>Run analysis, review classifications, and download CSV.</li>
+            </ol>
+          </article>
+
+          <article className="panel">
             <h2>What You Get</h2>
-            <p className="muted">A clean workflow: ingest files, apply role-aware LLM categorization, and export a review-ready CSV.</p>
-            <div className="feature-list">
-              <p>Role-specific tax deduction detection for common freelance businesses.</p>
-              <p>Low-cost automation for transaction cleanup and first-pass categorization.</p>
-              <p>Transparent reasoning for each deductible vs non-deductible decision.</p>
-            </div>
+            <ul className="clean-list">
+              <li>Role-aware deduction suggestions tuned to your business type.</li>
+              <li>Clear breakdown by deductible vs non-deductible totals.</li>
+              <li>Built-in transaction chat for quick questions during review.</li>
+            </ul>
           </article>
 
-          <article className="panel">
-            <h2>Sample Transactions </h2>
-            <p className="muted">Preview of the classified transaction table after analysis.</p>
-            <div className="table mock-table">
-              <table className="transactions-table">
-                <thead>
-                  <tr>
-                    <th className="tx-id-col">Transaction ID</th>
-                    <th>Date</th>
-                    <th>Institution</th>
-                    <th>Description</th>
-                    <th>Amount</th>
-                    <th>Type</th>
-                    <th>Category</th>
-                    <th>Deductible</th>
-                    <th>LLM Reasoning</th>
-                  </tr>
-                </thead>
-                <tbody>
+          <article className="panel panel-full">
+            <div className="panel-header">
+              <h2>Sample Review Snapshot</h2>
+              <span className="sample-pill">4 transactions</span>
+            </div>
+            <p className="muted">Example output after a complete run.</p>
+            <div className="snapshot-grid">
+              <div>
+                <h3 className="snapshot-heading">Latest Classifications</h3>
+                <ul className="snapshot-list">
                   {sampleTransactions.map((tx) => (
-                    <tr key={tx.id}>
-                      <td className="tx-id-cell" title={tx.id}>{tx.id}</td>
-                      <td>{tx.date}</td>
-                      <td>{tx.institution}</td>
-                      <td>{tx.description}</td>
-                      <td>${Number.parseFloat(tx.amount).toFixed(2)}</td>
-                      <td>{tx.transactionType}</td>
-                      <td>{tx.llmCategory}</td>
-                      <td>{tx.isDeductible ? "Yes" : "No"}</td>
-                      <td>{tx.llmReasoning}</td>
-                    </tr>
+                    <li key={tx.id}>
+                      <span>{tx.description}</span>
+                      <span className={`result-badge ${tx.isDeductible ? "yes" : "no"}`}>
+                        {tx.isDeductible ? "Likely deductible" : "Needs review"}
+                      </span>
+                    </li>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </article>
-
-          <article className="panel">
-            <h2>Sample Category Totals</h2>
-            <p className="muted">Category rollup that highlights likely writeoffs at a glance.</p>
-            <div className="table mock-table">
-              <table className="summary-table">
-                <thead>
-                  <tr>
-                    <th>Category</th>
-                    <th>Total</th>
-                    <th>Deductible</th>
-                    <th>Not Deductible</th>
-                    <th>Transaction Count</th>
-                  </tr>
-                </thead>
-                <tbody>
+                </ul>
+              </div>
+              <div>
+                <h3 className="snapshot-heading">Category Totals</h3>
+                <ul className="snapshot-list">
                   {sampleCategoryTotals.map((row) => (
-                    <tr key={row.category}>
-                      <td>{row.category}</td>
-                      <td>{row.total}</td>
-                      <td>{row.deductible}</td>
-                      <td>{row.nonDeductible}</td>
-                      <td>{row.count}</td>
-                    </tr>
+                    <li key={row.category}>
+                      <span>{row.category}</span>
+                      <span>{row.deductible} / {row.total}</span>
+                    </li>
                   ))}
-                </tbody>
-              </table>
+                </ul>
+              </div>
             </div>
           </article>
         </section>
@@ -403,7 +516,7 @@ export function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Signed in as {me.email}</p>
-          <h1>Writeoffs Workflow</h1>
+          <h1>Before Your Advisor Workspace</h1>
         </div>
         <div className="hero-actions">
           {needsReauth ? (
@@ -455,6 +568,9 @@ export function App() {
                 setAnalysisStatus(null);
                 setTransactions([]);
                 setSummaryRows([]);
+                setChatEligibility(null);
+                setChatMessages([]);
+                setChatOpen(false);
                 lastIngestionState.current = null;
               } catch (e) {
                 notifyError("Data cleaning failed to start", e);
@@ -513,55 +629,182 @@ export function App() {
 
         <article className="panel">
           <h2>3. Run AI Analysis</h2>
-          <p className="muted">Classify unprocessed transactions and mark likely deductions.</p>
+          <p className="muted">Classify unprocessed transactions and mark likely tax deductions.</p>
           <label>
             Optional focus note
             <textarea
               value={analysisNote}
               onChange={(e) => setAnalysisNote(e.target.value)}
-              placeholder="look for utilities and dinner expenses to write off"
+              placeholder="flag utilities and client meals for closer review"
             />
           </label>
           <button
             className="button workflow-action"
-            disabled={!profileComplete}
+            disabled={!profileComplete || analysisCheckoutProcessing}
             onClick={async () => {
               try {
-                const started = await api.startAnalysis({
+                setAnalysisCheckoutProcessing(true);
+                const checkout = await api.startAnalysisCheckout({
                   ingestionJobId: ingestionJobId ?? undefined,
                   analysisNote,
                 });
-                if (started.refreshed) {
-                  notify({
-                    kind: "info",
-                    title: "Refreshing AI analysis",
-                    message: `Cleared ${started.clearedClassifications} previous classifications before rerun.`,
-                    durationMs: 4500,
-                  });
-                }
-                setAnalysisJobId(started.jobId);
-                setAnalysisStatus({ jobId: started.jobId, state: "queued", processed: 0, total: 0, error: null });
-                setTransactions([]);
-                setSummaryRows([]);
-                lastAnalysisState.current = null;
-                notify({
-                  key: "analysis-progress",
-                  kind: "info",
-                  title: "Running analysis",
-                  message: "Starting batch analysis...",
-                  persistent: true,
-                });
+                window.location.href = checkout.checkoutUrl;
               } catch (e) {
+                setAnalysisCheckoutProcessing(false);
                 notifyError("Analysis failed to start", e);
               }
             }}
           >
-            Run AI Analysis
+            {analysisCheckoutProcessing ? "Redirecting to Checkout..." : "Run AI Analysis"}
           </button>
         </article>
       </section>
 
-      <section>
+      <section className="section-spacer">
+        <article className="panel panel-full">
+          <div className="panel-header">
+            <h2>Data Agent Chat</h2>
+            <div className="chat-header-actions">
+              <button
+                className="button secondary"
+                disabled={chatLoading}
+                onClick={() => {
+                  const next = !chatOpen;
+                  setChatOpen(next);
+                  if (next && !chatInitialized) {
+                    void loadTransactionChatData();
+                  }
+                }}
+              >
+                {chatOpen ? "Hide Chat" : "Open Chat"}
+              </button>
+              <button
+                className="button secondary"
+                disabled={chatLoading || chatSending || !chatOpen}
+                onClick={async () => {
+                  try {
+                    setChatLoading(true);
+                    await api.clearTransactionChatHistory();
+                    setChatMessages([]);
+                    setChatInput("");
+                    setChatError(null);
+                    setChatInitialized(true);
+                    notify({
+                      kind: "success",
+                      title: "Chat reset",
+                      durationMs: 2200,
+                    });
+                  } catch (error) {
+                    setChatError(getErrorMessage(error));
+                  } finally {
+                    setChatLoading(false);
+                  }
+                }}
+              >
+                Start New Chat
+              </button>
+            </div>
+          </div>
+          <p className="muted">
+            Ask natural language questions about your transaction data. Requires at least 2 transaction rows.
+          </p>
+          {chatEligibility ? (
+            <p className="muted chat-eligibility-line">
+              Eligible: {chatEligibility.eligible ? "Yes" : "No"} ({chatEligibility.transactionCount} rows)
+            </p>
+          ) : null}
+          {chatError ? <div className="error-banner">{chatError}</div> : null}
+          {chatOpen ? (
+            <div className="chat-shell">
+              <div className="chat-messages">
+                {chatMessages.length === 0 ? <p className="muted">No messages yet.</p> : null}
+                {chatMessages.map((message) => (
+                  <article key={message.id} className={`chat-message ${message.role === "user" ? "user" : "assistant"}`}>
+                    <p className="chat-role">{message.role === "user" ? "You" : "Data Agent"}</p>
+                    <p>{message.content}</p>
+                    {message.resultTable ? (
+                      <div className="table chat-result-table">
+                        {message.resultTable.rows.length > 0 ? (
+                          <table className="summary-table">
+                            <thead>
+                              <tr>
+                                {message.resultTable.columns.map((column) => (
+                                  <th key={column}>{column}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {message.resultTable.rows.map((row, rowIndex) => (
+                                <tr key={`${message.id}-${rowIndex}`}>
+                                  {message.resultTable?.columns.map((column) => (
+                                    <td key={`${message.id}-${rowIndex}-${column}`}>{formatChatCell(row[column])}</td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <p className="muted">Query returned 0 rows.</p>
+                        )}
+                      </div>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+              <form
+                className="chat-composer"
+                onSubmit={async (event) => {
+                  event.preventDefault();
+                  const trimmed = chatInput.trim();
+                  if (!trimmed || chatSending || chatLoading) return;
+                  if (!chatEligibility?.eligible) {
+                    setChatError("At least 2 transaction rows are required before using chat.");
+                    return;
+                  }
+
+                  const optimisticMessage: TransactionChatMessage = {
+                    id: `temp-${Date.now()}`,
+                    role: "user",
+                    content: trimmed,
+                    sql: null,
+                    resultTable: null,
+                    createdAt: new Date().toISOString(),
+                  };
+
+                  setChatMessages((previous) => [...previous, optimisticMessage]);
+                  setChatInput("");
+                  setChatError(null);
+                  setChatSending(true);
+                  try {
+                    const response = await api.sendTransactionChatMessage(trimmed);
+                    setChatMessages((previous) => [...previous, response.row]);
+                  } catch (error) {
+                    setChatError(getErrorMessage(error));
+                  } finally {
+                    setChatSending(false);
+                  }
+                }}
+              >
+                <input
+                  value={chatInput}
+                  onChange={(event) => setChatInput(event.target.value)}
+                  placeholder="e.g. show my top 10 deductible categories this year"
+                  disabled={chatSending || chatLoading || !chatEligibility?.eligible}
+                />
+                <button
+                  className="button"
+                  type="submit"
+                  disabled={chatSending || chatLoading || !chatEligibility?.eligible || chatInput.trim().length === 0}
+                >
+                  {chatSending ? "Running..." : "Send"}
+                </button>
+              </form>
+            </div>
+          ) : null}
+        </article>
+      </section>
+
+      <section className="section-spacer">
         <article className="panel panel-full">
           <div className="panel-header">
             <h2>Transactions</h2>

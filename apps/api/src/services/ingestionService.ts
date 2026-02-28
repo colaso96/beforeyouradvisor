@@ -17,10 +17,44 @@ async function parseCsv(buffer: Buffer): Promise<RawRecord[]> {
   });
 }
 
-function pickAdapter(file: DriveFile): "CHASE" | "AMEX" | "COINBASE" {
-  const name = file.name.toLowerCase();
+function detectCsvAdapter(rows: RawRecord[], fileName: string): "CHASE" | "AMEX" {
+  const firstRow = rows[0] ?? {};
+  const headerSet = new Set(
+    Object.keys(firstRow).map((key) => key.replace(/^\uFEFF/, "").trim().toLowerCase()),
+  );
+
+  if (headerSet.has("transaction date") || headerSet.has("post date") || headerSet.has("type") || headerSet.has("category")) {
+    return "CHASE";
+  }
+
+  if (headerSet.has("date") && headerSet.has("description") && headerSet.has("amount") && !headerSet.has("transaction date")) {
+    return "AMEX";
+  }
+
+  const name = fileName.toLowerCase();
+  if (name.includes("amex") || name.includes("american express")) return "AMEX";
+  if (name.includes("chase")) return "CHASE";
+
+  let positives = 0;
+  let negatives = 0;
+  for (const row of rows.slice(0, 50)) {
+    const value = row["Amount"];
+    if (typeof value !== "string" && typeof value !== "number") continue;
+    const parsed = Number.parseFloat(String(value).replaceAll("$", "").replaceAll(",", "").trim());
+    if (!Number.isFinite(parsed)) continue;
+    if (parsed > 0) positives += 1;
+    if (parsed < 0) negatives += 1;
+  }
+
+  if (positives > negatives) return "AMEX";
+  return "CHASE";
+}
+
+export function pickAdapter(file: DriveFile, rows?: RawRecord[]): "CHASE" | "AMEX" | "COINBASE" {
   if (file.mimeType === "application/pdf") return "COINBASE";
-  if (name.includes("amex")) return "AMEX";
+  if (rows) return detectCsvAdapter(rows, file.name);
+  const name = file.name.toLowerCase();
+  if (name.includes("amex") || name.includes("american express")) return "AMEX";
   return "CHASE";
 }
 
@@ -60,18 +94,21 @@ export async function runIngestionJob(jobId: string, userId: string, accessToken
     let processed = 0;
     for (const file of files) {
       const fileLabel = `${file.name} (${file.id})`;
-      const adapter = pickAdapter(file);
-      console.info(`[ingestion:${jobId}] Processing file ${processed + 1}/${files.length}: ${fileLabel} via ${adapter}`);
+      console.info(`[ingestion:${jobId}] Processing file ${processed + 1}/${files.length}: ${fileLabel}`);
 
       try {
         const raw = await downloadFile(accessToken, file.id);
         let normalized: NormalizedTransaction[] = [];
-        if (adapter === "COINBASE") {
+        const mimeAdapter = pickAdapter(file);
+        if (mimeAdapter === "COINBASE") {
           const rows = await extractCoinbaseRowsFromPdf(raw);
           normalized = normalizeCoinbasePdf(userId, rows);
+          console.info(`[ingestion:${jobId}] Adapter selected: COINBASE for ${fileLabel}`);
         } else {
           const rows = await parseCsv(raw);
-          normalized = adapter === "AMEX" ? normalizeAmexCsv(userId, rows) : normalizeChaseCsv(userId, rows);
+          const csvAdapter = pickAdapter(file, rows);
+          console.info(`[ingestion:${jobId}] Adapter selected: ${csvAdapter} for ${fileLabel}`);
+          normalized = csvAdapter === "AMEX" ? normalizeAmexCsv(userId, rows) : normalizeChaseCsv(userId, rows);
         }
 
         console.info(`[ingestion:${jobId}] Parsed ${normalized.length} transactions from ${fileLabel}`);
@@ -79,7 +116,7 @@ export async function runIngestionJob(jobId: string, userId: string, accessToken
         processed += 1;
         await query("UPDATE ingestion_jobs SET processed_files = $1, updated_at = NOW() WHERE id = $2", [processed, jobId]);
       } catch (error) {
-        const fileError = `Failed file ${fileLabel} (${adapter}): ${getErrorMessage(error)}`;
+        const fileError = `Failed file ${fileLabel}: ${getErrorMessage(error)}`;
         console.error(`[ingestion:${jobId}] ${fileError} | details: ${errorToLogString(error)}`);
         throw new Error(fileError);
       }
